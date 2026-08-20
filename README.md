@@ -6,22 +6,14 @@ Welcome to my **LeetCode Solutions** repository! 🚀
 
 I'm using this repository to document my journey of improving **Data Structures & Algorithms, problem-solving, and algorithmic thinking** by solving LeetCode problems consistently.
 
-[![LeetCode](https://img.shields.io/badge/LeetCode-240%2B%20Solved-orange?style=for-the-badge&logo=leetcode&logoColor=white)](https://leetcode.com/u/MynameisChethanL/)
+[![LeetCode](https://img.shields.io/badge/LeetCode-240%2B%20Solved-orange?style=for-the-badge&logo=leetcode&logoColor=white)](https://leetcode.com/u/MynameisChethan/)
 [![GitHub](https://img.shields.io/badge/GitHub-Chethan--ULTIMAX-black?style=for-the-badge&logo=github)](https://github.com/Chethan-ULTIMAX)
 
 ---
 
 ## 📊 Current LeetCode Progress
 
-| Category | Solved |
-|---|---:|
-| 🟢 Easy | **196** |
-| 🟡 Medium | **42** |
-| 🔴 Hard | **2** |
-| 🎯 Total | **240** |
-
-**Current streak:** 89 days 🔥  
-**Active days:** 89
+[![LeetCode Stats](https://leetcard.jacoblin.cool/MynameisChethan?theme=dark)](https://leetcode.com/u/MynameisChethan)
 
 > These numbers reflect my LeetCode profile and will change as I continue solving problems.
 
