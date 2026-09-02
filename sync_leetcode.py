@@ -106,10 +106,12 @@ def get_submissions(slug):
 
 def get_source_code(submission_id):
     query = """
-    query submissionDetails($submissionId: Int!) {
-        submissionDetails(submissionId: $submissionId) {
+    query mySubmissionDetail($id: ID!) {
+        submissionDetail(submissionId: $id) {
+            id
             code
             lang
+            statusDisplay
         }
     }
     """
@@ -117,15 +119,15 @@ def get_source_code(submission_id):
     data = graphql(
         query,
         {
-            "submissionId": int(submission_id)
+            "id": str(submission_id)
         },
-        "submissionDetails"
+        "mySubmissionDetail"
     )
 
     if not data:
         return None
 
-    return data.get("submissionDetails")
+    return data.get("submissionDetail")
 
 # =========================
 # LANGUAGE -> EXTENSION
