@@ -47,9 +47,12 @@ def graphql(query, variables, operation_name):
         timeout=30,
     )
 
-    response.raise_for_status()
-
     result = response.json()
+
+    if response.status_code != 200:
+        print("HTTP status:", response.status_code)
+        print("Response:", result)
+        return None
 
     if result.get("errors"):
         print("GraphQL error:")
