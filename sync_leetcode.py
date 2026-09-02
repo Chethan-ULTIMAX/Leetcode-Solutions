@@ -14,7 +14,7 @@ USERNAME = os.environ["LEETCODE_USERNAME"]
 SESSION = os.environ["LEETCODE_SESSION"]
 CSRF = os.environ["LEETCODE_CSRFTOKEN"]
 
-LEETCODE_URL = "https://leetcode.com/graphql"
+LEETCODE_URL = "https://leetcode.com/graphql/"
 
 cookies = {
     "LEETCODE_SESSION": SESSION,
@@ -68,29 +68,19 @@ def graphql(query, variables, operation_name):
 
 
 # =========================
-# GET SUBMISSION HISTORY
+# GET ALL SOLVED PROBLEMS
 # =========================
 
-def get_submission_page(offset, limit=20):
-
+def get_solved_page(skip, limit=100):
     query = """
-    query submissionList(
-        $offset: Int!,
-        $limit: Int!
-    ) {
-        submissionList(
-            offset: $offset,
-            limit: $limit
-        ) {
-            submissions {
-                id
-                statusDisplay
-                lang
-                timestamp
-                question {
-                    title
-                    titleSlug
-                }
+    query userProgressQuestionList($filters: UserProgressQuestionListInput) {
+        userProgressQuestionList(filters: $filters) {
+            totalNum
+            questions {
+                frontendId
+                title
+                titleSlug
+                lastSubmittedAt
             }
         }
     }
@@ -99,11 +89,107 @@ def get_submission_page(offset, limit=20):
     return graphql(
         query,
         {
-            "offset": offset,
-            "limit": limit,
+            "filters": {
+                "questionStatus": "SOLVED",
+                "skip": skip,
+                "limit": limit,
+            }
+        },
+        "userProgressQuestionList",
+    )
+
+
+def get_all_solved_problems():
+    solved = []
+    skip = 0
+    limit = 100
+
+    while True:
+        print(f"Fetching solved problems {skip + 1}-{skip + limit}...")
+
+        data = get_solved_page(skip, limit)
+
+        if not data:
+            return None
+
+        result = data.get("userProgressQuestionList")
+
+        if not result:
+            return None
+
+        questions = result.get("questions", [])
+        total = result.get("totalNum", 0)
+
+        solved.extend(questions)
+
+        print(f"  Received {len(questions)} problems. Total reported: {total}")
+
+        if not questions or len(solved) >= total:
+            break
+
+        skip += len(questions)
+        time.sleep(0.5)
+
+    # Remove duplicate slugs while preserving LeetCode's order.
+    unique = {}
+    for problem in solved:
+        slug = problem.get("titleSlug")
+        if slug and slug not in unique:
+            unique[slug] = problem
+
+    return list(unique.values())
+
+
+# =========================
+# GET ACCEPTED SUBMISSION
+# =========================
+
+def get_accepted_submission(slug):
+    query = """
+    query submissionList(
+        $offset: Int!,
+        $limit: Int!,
+        $questionSlug: String
+    ) {
+        submissionList(
+            offset: $offset,
+            limit: $limit,
+            questionSlug: $questionSlug
+        ) {
+            submissions {
+                id
+                statusDisplay
+                lang
+                timestamp
+            }
+        }
+    }
+    """
+
+    data = graphql(
+        query,
+        {
+            "offset": 0,
+            "limit": 20,
+            "questionSlug": slug,
         },
         "submissionList",
     )
+
+    if not data:
+        return None
+
+    result = data.get("submissionList")
+    if not result:
+        return None
+
+    accepted = [
+        submission
+        for submission in result.get("submissions", [])
+        if submission.get("statusDisplay") == "Accepted"
+    ]
+
+    return accepted[0] if accepted else None
 
 
 # =========================
@@ -111,7 +197,6 @@ def get_submission_page(offset, limit=20):
 # =========================
 
 def get_source_code(submission_id):
-
     query = """
     query submissionDetails($submissionId: Int!) {
         submissionDetails(submissionId: $submissionId) {
@@ -122,10 +207,8 @@ def get_source_code(submission_id):
 
     data = graphql(
         query,
-        {
-            "submissionId": int(submission_id)
-        },
-        "submissionDetails"
+        {"submissionId": int(submission_id)},
+        "submissionDetails",
     )
 
     if not data:
@@ -164,8 +247,7 @@ LANGUAGE_EXTENSIONS = {
 
 
 def get_extension(language):
-    language = language.lower().strip()
-    return LANGUAGE_EXTENSIONS.get(language, ".txt")
+    return LANGUAGE_EXTENSIONS.get(language.lower().strip(), ".txt")
 
 
 # =========================
@@ -173,18 +255,9 @@ def get_extension(language):
 # =========================
 
 def clean_filename(name):
-
     name = name.lower()
-
-    name = re.sub(
-        r"[^a-z0-9]+",
-        "_",
-        name
-    )
-
-    name = name.strip("_")
-
-    return name
+    name = re.sub(r"[^a-z0-9]+", "_", name)
+    return name.strip("_")
 
 
 # =========================
@@ -192,7 +265,6 @@ def clean_filename(name):
 # =========================
 
 def choose_folder(title):
-
     title_lower = title.lower()
 
     folders = {
@@ -210,7 +282,6 @@ def choose_folder(title):
     }
 
     for keyword, folder in folders.items():
-
         if keyword in title_lower:
             return folder
 
@@ -218,18 +289,47 @@ def choose_folder(title):
 
 
 # =========================
-# CHECK TARGET FILE
+# EXISTING FILE DETECTION
 # =========================
 
-def get_target_path(title, language):
+def normalize_tokens(text):
+    return set(re.findall(r"[a-z0-9]+", text.lower()))
 
-    extension = get_extension(language)
 
-    filename = clean_filename(title) + extension
+def problem_already_exists(title, frontend_id, expected_path):
+    # First: exact path used by the automatic sync.
+    if expected_path.exists():
+        return True, expected_path
 
-    folder = choose_folder(title)
+    title_tokens = normalize_tokens(title)
+    frontend_id = str(frontend_id or "").strip()
 
-    return Path(folder) / filename
+    # Second: recognize older/manual filenames in the repository.
+    # A numeric prefix such as 004_ is matched against LeetCode's
+    # frontend problem number. This avoids confusing similarly named
+    # problems such as "Median of Two Sorted Arrays" and "... II".
+    for path in Path(".").rglob("*"):
+        if not path.is_file():
+            continue
+
+        if ".git" in path.parts:
+            continue
+
+        if path.suffix.lower() not in set(LANGUAGE_EXTENSIONS.values()) | {".txt"}:
+            continue
+
+        stem = path.stem.lower()
+        numbers = re.match(r"^(\d+)[_-]", stem)
+
+        if numbers and frontend_id:
+            if str(int(numbers.group(1))) == str(int(frontend_id)):
+                return True, path
+
+        # For non-numbered files, require an exact normalized title.
+        if normalize_tokens(stem) == title_tokens:
+            return True, path
+
+    return False, expected_path
 
 
 # =========================
@@ -237,231 +337,100 @@ def get_target_path(title, language):
 # =========================
 
 def main():
-
     print("Starting LeetCode sync...")
     print(f"Username: {USERNAME}")
     print()
 
-    offset = 0
-    page_size = 20
+    problems = get_all_solved_problems()
 
-    checked_problems = set()
+    if problems is None:
+        print()
+        print("Could not retrieve the complete solved-problem list.")
+        print("Nothing was changed.")
+        return
 
-    while True:
+    print()
+    print(f"LeetCode solved problems found: {len(problems)}")
+    print("Searching for the first problem not yet in GitHub...")
 
-        print(
-            f"Fetching submissions "
-            f"{offset + 1}-{offset + page_size}..."
+    checked = 0
+
+    # Newest solved/last-submitted problems are returned first.
+    # The script intentionally creates ONLY ONE missing solution per run.
+    for problem in problems:
+        title = problem.get("title")
+        slug = problem.get("titleSlug")
+        frontend_id = problem.get("frontendId")
+
+        if not title or not slug:
+            continue
+
+        checked += 1
+
+        accepted = get_accepted_submission(slug)
+
+        if not accepted:
+            continue
+
+        language = accepted.get("lang", "text")
+        extension = get_extension(language)
+        expected_path = (
+            Path(choose_folder(title)) /
+            (clean_filename(title) + extension)
         )
 
-        data = get_submission_page(
-            offset,
-            page_size
+        exists, existing_path = problem_already_exists(
+            title,
+            frontend_id,
+            expected_path,
         )
 
-        if not data:
+        if exists:
+            print(f"Already synced: {title} -> {existing_path}")
+            continue
 
-            print()
-            print("Could not retrieve submission history.")
+        submission_id = accepted.get("id")
+
+        print()
+        print("================================")
+        print("NEW SOLUTION FOUND")
+        print(f"Problem: {title}")
+        print(f"Submission ID: {submission_id}")
+        print(f"Language: {language}")
+        print(f"File: {expected_path}")
+        print("================================")
+
+        if not submission_id:
+            print("Submission ID missing. Nothing changed.")
             return
 
-        result = data.get("submissionList")
+        details = get_source_code(submission_id)
 
-        if not result:
-
-            print()
-            print("No submission list returned.")
+        if not details:
+            print("Could not retrieve source code. Nothing changed.")
             return
 
-        submissions = result.get(
-            "submissions",
-            []
-        )
+        code = details.get("code")
 
-        if not submissions:
-
-            print()
-            print("No more submissions found.")
-            break
-
-        print(
-            f"Received {len(submissions)} submissions."
-        )
-
-        # ==========================================
-        # Process submissions in the order returned.
-        # LeetCode returns newest submissions first.
-        # ==========================================
-
-        for submission in submissions:
-
-            if submission.get("statusDisplay") != "Accepted":
-                continue
-
-            question = submission.get("question")
-
-            if not question:
-                continue
-
-            title = question.get("title")
-            slug = question.get("titleSlug")
-
-            if not title or not slug:
-                continue
-
-            # --------------------------------------
-            # We only need to process each problem
-            # once during this run.
-            # --------------------------------------
-
-            if slug in checked_problems:
-                continue
-
-            checked_problems.add(slug)
-
-            language = submission.get(
-                "lang",
-                "text"
-            )
-
-            filepath = get_target_path(
-                title,
-                language
-            )
-
-            print()
-            print(f"Processing: {title}")
-            print(f"  Language: {language}")
-            print(f"  Expected file: {filepath}")
-
-            # --------------------------------------
-            # FILE ALREADY EXISTS
-            # --------------------------------------
-
-            if filepath.exists():
-
-                print(
-                    f"  Already exists: {filepath}"
-                )
-
-                continue
-
-            # --------------------------------------
-            # THIS IS THE FIRST MISSING FILE
-            # --------------------------------------
-
-            submission_id = submission.get("id")
-
-            if not submission_id:
-
-                print(
-                    "  Submission ID missing."
-                )
-
-                continue
-
-            print(
-                f"  Missing file found!"
-            )
-
-            print(
-                f"  Submission ID: {submission_id}"
-            )
-
-            # --------------------------------------
-            # Retrieve source code ONLY NOW.
-            # --------------------------------------
-
-            details = get_source_code(
-                submission_id
-            )
-
-            if not details:
-
-                print(
-                    "  Could not retrieve source code."
-                )
-
-                continue
-
-            code = details.get("code")
-
-            if not code:
-
-                print(
-                    "  Source code was empty."
-                )
-
-                continue
-
-            # --------------------------------------
-            # Create directory
-            # --------------------------------------
-
-            filepath.parent.mkdir(
-                parents=True,
-                exist_ok=True
-            )
-
-            # --------------------------------------
-            # Create ONE solution
-            # --------------------------------------
-
-            filepath.write_text(
-                code,
-                encoding="utf-8"
-            )
-
-            print()
-            print(
-                f"  Created: {filepath}"
-            )
-
-            print()
-            print(
-                "Found and created ONE new solution."
-            )
-
-            print(
-                "Stopping this sync now."
-            )
-
-            # ======================================
-            # IMPORTANT:
-            # STOP THE ENTIRE SCRIPT.
-            # ======================================
-
+        if not code:
+            print("Source code was empty. Nothing changed.")
             return
 
-        # ==========================================
-        # If fewer than 20 were returned, this was
-        # the final page.
-        # ==========================================
+        expected_path.parent.mkdir(parents=True, exist_ok=True)
+        expected_path.write_text(code, encoding="utf-8")
 
-        if len(submissions) < page_size:
-
-            print()
-            print(
-                "Reached the end of submission history."
-            )
-
-            break
-
-        offset += page_size
-
-        time.sleep(0.5)
-
-    # =========================
-    # NOTHING NEW
-    # =========================
+        print()
+        print(f"Created: {expected_path}")
+        print("ONE new solution created.")
+        print("Stopping now so the workflow can commit exactly one solution.")
+        return
 
     print()
     print("================================")
     print("LeetCode sync finished.")
-    print(
-        f"Problems checked: {len(checked_problems)}"
-    )
-    print("No new solution found.")
+    print(f"Problems checked: {checked}")
+    print("Every checked solved problem already exists in GitHub.")
+    print("No new solution created.")
     print("================================")
 
 
