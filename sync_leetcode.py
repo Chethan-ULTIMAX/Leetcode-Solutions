@@ -112,7 +112,6 @@ def get_source_code(submission_id):
     query submissionDetails($submissionId: Int!) {
         submissionDetails(submissionId: $submissionId) {
             code
-            lang
         }
     }
     """
