@@ -58,52 +58,36 @@ def graphql(query, variables, operation_name):
 
     return result.get("data")
 
-
-# =========================
-# GET ACCEPTED SUBMISSIONS
-# =========================
-
-SUBMISSIONS_QUERY = """
-query submissionList(
-    $offset: Int!,
-    $limit: Int!,
-    $lastKey: String,
-    $questionSlug: String
-) {
-    submissionList(
-        offset: $offset,
-        limit: $limit,
-        lastKey: $lastKey,
-        questionSlug: $questionSlug
+def get_submissions(slug):
+    query = """
+    query submissionList(
+        $offset: Int!,
+        $limit: Int!,
+        $questionSlug: String
     ) {
-        lastKey
-        hasNext
-        submissions {
-            id
-            statusDisplay
-            lang
-            timestamp
-            question {
-                title
-                titleSlug
-                questionFrontendId
+        submissionList(
+            offset: $offset,
+            limit: $limit,
+            questionSlug: $questionSlug
+        ) {
+            submissions {
+                id
+                statusDisplay
+                lang
+                timestamp
             }
         }
     }
-}
-"""
+    """
 
-
-def get_submissions(slug):
     data = graphql(
-        SUBMISSIONS_QUERY,
+        query,
         {
             "offset": 0,
             "limit": 20,
-            "lastKey": None,
-            "questionSlug": slug,
+            "questionSlug": slug
         },
-        "submissionList",
+        "submissionList"
     )
 
     if not data:
@@ -115,48 +99,33 @@ def get_submissions(slug):
         return []
 
     return [
-        submission
-        for submission in result.get("submissions", [])
-        if submission.get("statusDisplay") == "Accepted"
+        s for s in result.get("submissions", [])
+        if s.get("statusDisplay") == "Accepted"
     ]
 
 
-# =========================
-# GET SOURCE CODE
-# =========================
-
-SOURCE_QUERY = """
-query submissionDetails($submissionId: Int!) {
-    submissionDetails(submissionId: $submissionId) {
-        code
-        lang
-        runtime
-        memory
-        timestamp
-    }
-}
-"""
-
-
 def get_source_code(submission_id):
+    query = """
+    query submissionDetails($submissionId: Int!) {
+        submissionDetails(submissionId: $submissionId) {
+            code
+            lang
+        }
+    }
+    """
+
     data = graphql(
-        SOURCE_QUERY,
+        query,
         {
             "submissionId": int(submission_id)
         },
-        "submissionDetails",
+        "submissionDetails"
     )
 
     if not data:
         return None
 
-    details = data.get("submissionDetails")
-
-    if not details:
-        return None
-
-    return details
-
+    return data.get("submissionDetails")
 
 # =========================
 # LANGUAGE -> EXTENSION
